@@ -1,67 +1,23 @@
+# camp release workflow: copy to .github/workflows/camp-release.yml in your
+# plugin repository, unchanged. Publishing to camp is then `git tag v1.2.3 &&
+# git push --tags`. Everything happens in the maintained reusable workflow
+# (camp-registry/camp-workflows), so fixes reach you without re-copying.
+# `@v1` follows the maintained workflow (a movable tag, protected against
+# deletion or movement by anyone but the repository's admins). If your
+# policy forbids calling a movable ref with `id-token: write`, pin a commit
+# instead, `release.yml@<full-commit-sha> # v1`, and let Dependabot bump it;
+# you then receive fixes only when bumped. The caller holds no secrets, and
+# the registry rebuilds every release from your public tag before publishing.
+# Docs: https://github.com/camp-registry/camp-docs/blob/main/AUTHORS.md
 name: Publish release to camp
-
 on:
   push:
-    tags: ["*"]
+    tags: ["v*"]
   workflow_dispatch: {}
-
-env:
-  CAMP_INDEX_REPO: camp-registry/camp-index
-  COMPONENT: editor_marklar
-  SUPPORTED_MOODLE: ""
-
+permissions:
+  contents: read
+  id-token: write
 jobs:
-  publish:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out plugin at the tag
-        uses: actions/checkout@v4
-        with:
-          path: plugin
-          fetch-depth: 0
+  camp:
+    uses: camp-registry/camp-workflows/.github/workflows/release.yml@v1
 
-      - name: Check out camp index
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.CAMP_INDEX_REPO }}
-          path: index-repo
-          token: ${{ secrets.CAMP_INDEX_TOKEN }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install camp tools
-        run: pip install --quiet "git+https://github.com/camp-registry/camp-tools@v0.2.20"
-
-      - name: Require a listing manifest
-        run: camp scaffold plugin --check
-
-      - name: Label heuristics + security lint (warn-only preview)
-        run: |
-          camp lint-labels plugin || true
-          camp audit plugin || true
-
-      - name: Compute and append the release record
-        run: |
-          plugintype="${COMPONENT%%_*}"
-          camp release "index-repo/plugins/${plugintype}/${COMPONENT}.yml" \
-            "${GITHUB_REF_NAME}" --source ./plugin \
-            --supported-moodle "${SUPPORTED_MOODLE}"
-
-      - name: Open index pull request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.CAMP_INDEX_TOKEN }}
-          path: index-repo
-          # Most authors don't have write access to the index. Fork
-          # camp-registry/camp-index once (keep the fork's default branch in
-          # sync is NOT required), then uncomment with your fork:
-          push-to-fork: mudrd8mz/camp-index
-          branch: release/${{ env.COMPONENT }}-${{ github.ref_name }}
-          commit-message: "${{ env.COMPONENT }}: release ${{ github.ref_name }}"
-          title: "${{ env.COMPONENT }}: release ${{ github.ref_name }}"
-          body: |
-            Automated release PR from ${{ github.repository }} @ ${{ github.ref_name }}.
-            camp CI will independently rebuild the artifact from the tag and
-            verify the recorded hashes before this can merge.
